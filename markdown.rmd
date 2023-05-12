@@ -1,0 +1,260 @@
+---
+title: "Przysłowie pogodowe"
+output: word_document
+
+---
+```{r setup, include=FALSE, echo=FALSE}
+library(httr)
+library(jsonlite)
+library(tseries)
+library(segmented)
+
+```
+## 1. Badanie przysłowia pogodowego
+```{r}
+
+# Pobieranie danych pogodowych/klimatycznych dla Krakowa z API open-meteo
+r <- GET("https://archive-api.open-meteo.com/v1/archive?latitude=50.06&longitude=19.56&start_date=1950-01-01&end_date=2022-12-31&daily=temperature_2m_max,temperature_2m_min,temperature_2m_mean,precipitation_sum,precipitation_hours,winddirection_10m_dominant&timezone=Europe%2FWarsaw",
+        Accept = "application/json")
+jsonRespText <- content(r, as = "text")
+aux <- fromJSON(jsonRespText)
+
+# Tworzenie ramki danych dla danych pogodowych Krakowa
+krakow <- data.frame(time = aux$daily$time, t_2m_mean = aux$daily$temperature_2m_mean)
+krakow$time <- as.Date(krakow$time)
+
+# Pobieranie danych pogodowych/klimatycznych dla Warszawy z API open-meteo
+r <- GET("https://archive-api.open-meteo.com/v1/archive?latitude=52.23&longitude=21.01&start_date=1950-01-01&end_date=2022-12-31&daily=temperature_2m_max,temperature_2m_min,temperature_2m_mean,precipitation_sum,precipitation_hours,winddirection_10m_dominant&timezone=Europe%2FWarsaw",
+        Accept = "application/json")
+jsonRespText <- content(r, as = "text")
+aux <- fromJSON(jsonRespText)
+
+# Tworzenie ramki danych dla danych pogodowych Warszawy
+warszawa <- data.frame(time = aux$daily$time, t_2m_mean = aux$daily$temperature_2m_mean)
+warszawa$time <- as.Date(warszawa$time)
+
+
+```
+Sprawdzimy, czy przysłowie "Kwiecień plecień, bo przeplata, trochę zimy, trochę lata" ma pokrycie w rzeczywistości. W tym celu wykorzystamy dane pogodowe dla Krakowa i Warszawy z lat 1950-2021.
+Według kryterium termicznego za lato przyjmuje się okres roku, w którym średnie dobowe temperatury powietrza przekraczają 15 °C, zima to natomiast temperatura poniżej 0 °C.
+Wiosną zaś są dni, w których temperatura powietrza jest wyższa niż 0 °C, ale niższa niż 15 °C,
+Sprawdzimy ile dni w kwietniu w Krakowie i Warszawie pasuje do definicji lata i zimy.
+
+```{r}
+
+# wyodrębnienie danych dla miesiąca kwietnia
+kwiecien_krakow <- subset(krakow, format(krakow$time, "%m") == "04")
+kwiecien_warszawa <- subset(warszawa, format(warszawa$time, "%m") == "04")
+
+# stworzenie pustego data frame, do którego będziemy dodawać dane, ile dni w kwietniu było zimą, a ile latem dla każdego roku
+krakow_years <- data.frame(rok = as.integer(unique(format(kwiecien_krakow$time, "%Y"))), zima = as.integer(0), lato = as.integer(0))
+warszawa_years <- data.frame(rok = as.integer(unique(format(kwiecien_warszawa$time, "%Y"))), zima = as.integer(0), lato = as.integer(0))
+
+# sprawdzenie, ile dni w kwietniu było zimą, a ile latem dla każdego roku
+for (i in seq_len(nrow(krakow_years))) {
+  krakow_years$zima[i] <- sum(kwiecien_krakow$t_2m_mean[format(kwiecien_krakow$time, "%Y") == krakow_years$rok[i]] < 0)
+  krakow_years$lato[i] <- sum(kwiecien_krakow$t_2m_mean[format(kwiecien_krakow$time, "%Y") == krakow_years$rok[i]] > 15)
+  warszawa_years$zima[i] <- sum(kwiecien_warszawa$t_2m_mean[format(kwiecien_warszawa$time, "%Y") == warszawa_years$rok[i]] < 0)
+  warszawa_years$lato[i] <- sum(kwiecien_warszawa$t_2m_mean[format(kwiecien_warszawa$time, "%Y") == warszawa_years$rok[i]] > 15)
+
+}
+
+# wykres dla Krakowa, czerwony - dni letnie, niebieski - dni zimowe
+
+plot(krakow_years$rok, krakow_years$lato, type = "l", col = "red", xlab = "rok", ylab = "liczba dni", main = "Krakow") +
+lines(krakow_years$rok, krakow_years$zima, col = "blue")
+
+
+
+```
+Tworzymy wykres sumaryczny dla Krakowa, dzie sumujemy liczbę dni zimowych i letnich w każdym roku.
+
+```{r}
+
+plot(krakow_years$rok, krakow_years$lato + krakow_years$zima, type = "l", col = "black", xlab = "rok", ylab = "liczba dni", main = "Krakow")
+
+```
+Analogicznie dla Warszawy.
+
+```{r}
+
+plot(warszawa_years$rok, warszawa_years$lato, type = "l", col = "red", xlab = "rok", ylab = "liczba dni", main = "Warszawa") +
+lines(warszawa_years$rok, warszawa_years$zima, col = "blue")
+
+```
+
+```{r}
+
+plot(warszawa_years$rok, warszawa_years$lato + warszawa_years$zima, type = "l", col = "black", xlab = "rok", ylab = "liczba dni", main = "Warszawa")
+
+```
+Suma dni zimowych i letnich w Krakowie i Warszawie w kwietniu w latach 1950-2021:
+
+```{r}
+sprintf("Suma dni kwietniowych w tych latach: %d", 30 * nrow(krakow_years))
+sprintf("Krakow: %d, czyli %.2f%%", sum(krakow_years$lato + krakow_years$zima), sum(krakow_years$lato + krakow_years$zima) / (30 * nrow(krakow_years)) * 100)
+sprintf("Zimowych: %d, czyli %.2f%%, a letnich: %d, czyli %.2f%%", sum(krakow_years$zima), sum(krakow_years$zima) / (30 * nrow(krakow_years)) * 100, sum(krakow_years$lato), sum(krakow_years$lato) / (30 * nrow(krakow_years)) * 100)
+sprintf("Warszawa: %d, czyli %.2f%%", sum(warszawa_years$lato + warszawa_years$zima), sum(warszawa_years$lato + warszawa_years$zima) / (30 * nrow(warszawa_years)) * 100)
+sprintf("Zimowych: %d, czyli %.2f%%, a letnich: %d, czyli %.2f%%", sum(warszawa_years$zima), sum(warszawa_years$zima) / (30 * nrow(warszawa_years)) * 100, sum(warszawa_years$lato), sum(warszawa_years$lato) / (30 * nrow(warszawa_years)) * 100)
+```
+Jak widać w kwietniu występuję zdecydowanie więcej dni letnich niż zimowych.
+Wartość ta jest bardzo mała, jednakże, czy ilość dni letnich jest niezależna od ilości dni zimowych? Sprawdźmy to wykorzystując test Kołmogorowa-Smirnowa.
+
+```{r}
+
+ks.test(krakow_years$lato, krakow_years$zima)
+ks.test(warszawa_years$lato, warszawa_years$zima)
+
+
+```
+W pierwszym teście Kolmogorova-Smirnova p-value wynosi 0,0361, co jest mniejsze niż poziom istotności 0,05.
+Można zatem odrzucić hipotezę zerową i stwierdzić, że rozkłady temperatury dla Krakowa w sezonie lato i zimie są różne.
+W drugim teście p-value jest bardzo niskie (9,935e-05), co również pozwala odrzucić hipotezę zerową i stwierdzić, że rozkłady temperatury dla Warszawy w sezonie lato i zimie są różne.
+
+
+Jednakże, czy ilość dni letnich i zimowych jest zależna od miasta?
+
+```{r}
+
+ks.test(krakow_years$lato, warszawa_years$lato)
+ks.test(krakow_years$zima, warszawa_years$zima)
+
+
+```
+W obu testach p-value jest większe niż poziom istotności 0.1, co oznacza, że nie możemy odrzucić hipotezy zerowej.
+Można zatem uznać, że ilość dni letnich i zimowych nie zależy od miasta, ponieważ nie ma dużych różnic między Krakowem a Warszawą.
+
+
+
+Sprawdźmy jeszcze stacjonarność szeregów czasowych dla Krakowa i Warszawy, aby stwierdzić, czy wartości tych szeregów zmieniają się w czasie,
+czyli ilość dni letnich i zimowych zmienia się na przestrzeni lat.
+
+```{r}
+
+#KPSS test
+
+kpss.test(krakow_years$lato)
+kpss.test(krakow_years$zima)
+kpss.test(warszawa_years$lato)
+kpss.test(warszawa_years$zima)
+
+```
+Wartości p-value są duże, przez co nie możemy odrzucić hipotezy zerowej o stacjonarności tych szeregów czasowych.
+
+```{r}
+
+adf.test(krakow_years$lato)
+adf.test(krakow_years$zima)
+adf.test(warszawa_years$lato)
+adf.test(warszawa_years$zima)
+
+```
+Korzystając z bardzo popularnego testu ADF, możemy stwierdzić, że szeregi czasowe są stacjonarne, ponieważ wartości p-value są małe.
+
+
+Można stwierdzić, że to przysłowie nie ma przełożenia na rzeczywistość, ponieważ dni zimowe i letnie nie zależą od siebie, co nie pasuje do słów: "przeplata trochę zimy, trochę lata".
+Ponadto gołym okiem widoczna jest duża dysproporcja między ilością dni letnich i zimowych w kwietniu.
+Stacjonarność tych szeregów i ich niezależność od miasta pasowałaby do przysłowia, jednak ilość tych dni jest bardzo mała, przez co nie można stwierdzić, że przysłowie jest prawdziwe.
+Oczywiście odrzucamy założenie, że dzień wiosenny jest splotem dnia zimowego i letniego, ponieważ nie miałoby to sensu.
+
+## 2. Różnice między Wrocławiem a Gorzówem Wielkopolskim (gr. 4)
+
+```{r}
+
+# tworzenie dataframe z nazwami miast i ich współrzędnymi geograficznymi, zeby uzyskać dane pogodowe z API
+miasta <- data.frame(nazwa = c("Wrocław", "Gorzów Wielkopolski"), szerokosc = c(51.11, 52.74), dlugosc = c(17.06, 15.24))
+
+# Tworzenie pustej listy, do której będą dodawane dane z API
+List<-list()
+
+# Pobieranie danych z API dla 16 miast
+for (i in 1:2) {
+  # Tworzenie URL-a do API na podstawie szerokości i długości geograficznej miasta
+  s1<-"https://archive-api.open-meteo.com/v1/archive?latitude="
+  s2<-miasta$szerokosc[i]
+  s3<-"&longitude="
+  s4<-miasta$dlugosc[i]
+  s5<-'&start_date=1950-01-01&end_date=2022-12-31&daily=temperature_2m_max,temperature_2m_min,temperature_2m_mean,precipitation_sum,precipitation_hours,winddirection_10m_dominant&timezone=Europe%2FWarsaw'
+
+  str<-paste0(s1,s2,s3,s4,s5)
+
+  # Wysyłanie zapytania GET do API i parsowanie odpowiedzi w formacie JSON
+  r <- GET(str,
+    Accept = "application/json")
+    jsonRespText <- content(r, as = "text")
+    aux <- fromJSON(jsonRespText)
+
+  # Dodawanie danych do listy
+  List[[i]]<-aux
+}
+
+
+
+```
+Wyodrębnienie wszystkich średnich miesięcznych lipca dla obu miast.
+
+```{r}
+
+wroclaw <- as.data.frame(List[[1]]$daily)
+gorzow <- as.data.frame(List[[2]]$daily)
+
+# wybieranie miesiąca lipca
+wroclaw <- subset(wroclaw, format(as.Date(time), "%m") == "07")
+gorzow <- subset(gorzow, format(as.Date(time), "%m") == "07")
+
+#policzenie średnich miesięcznych
+library(dplyr)
+
+wroclaw <- wroclaw %>%
+  group_by(time = format(as.Date(time), "%Y")) %>%
+  summarise_all(mean)
+
+gorzow <- gorzow %>%
+  group_by(time = format(as.Date(time), "%Y")) %>%
+  summarise_all(mean)
+
+```
+Obliczenie różnic między miastami.
+
+```{r}
+
+roznice <- data.frame(time = wroclaw$time)
+
+for (i in 2:ncol(wroclaw)) {
+  roznice <- cbind(roznice, wroclaw[,i] - gorzow[,i])
+}
+
+#sporządzenie wykresów dla wszystkich różnic
+
+for (i in 2:ncol(roznice)) {
+  plot(roznice$time, roznice[,i], type = "l", xlab = "rok", ylab = "roznica", main = colnames(roznice)[i])
+  #dodanie linii średniej
+    abline(h = mean(roznice[,i]), col = "red")
+    #dodanie przerywanej linii w 0
+    abline(h = 0, col = "blue", lty = 2)
+
+}
+
+```
+
+Możemy przeprowadzić testy statystyczne, aby sprawdzić, czy różnice między miastami są istotne statystycznie.
+
+```{r}
+
+for (i in 2:ncol(roznice)) {
+  print(colnames(roznice)[i])
+  print(t.test(wroclaw[,i], gorzow[,i]))
+}
+
+
+
+```
+Dla zmiennych: "temperature_2m_max", "temperature_2m_min", "temperature_2m_mean", "precipitation_hours" wartości p-value są stosunkowo duże, przez co nie możemy odrzucić hipotezy zerowej o równości średnich,
+co oznacza, że nie ma istotnych statystycznie różnic między miastami dla tych danych.
+Natomiast dla: "precipitation_sum", "winddirection_10m_dominant" wartości p-value są bardzo małe, a przynajmniej wystarczające, żeby móc odrzucić hipotezę zerową o równości średnich, na poziomie istotności 0.05.
+Czyli te wartości różnią się między miastami.
+
+
+
+
+
